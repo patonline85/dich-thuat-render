@@ -1,7 +1,7 @@
 /**
  * File: /functions/translate.js
  * Xử lý yêu cầu POST đến /translate
- * Sử dụng regional generativelanguage endpoint để giải quyết lỗi vị trí và xác thực.
+ * Sử dụng global endpoint và mô hình gemini-pro để giải quyết các vấn đề về vị trí.
  */
 export async function onRequestPost(context) {
   try {
@@ -53,11 +53,9 @@ export async function onRequestPost(context) {
       ---
     `;
 
-    // 4. Gọi API của Google tại khu vực us-central1 để tránh lỗi vị trí
-    const region = "us-central1";
-    const model = "gemini-1.5-flash-latest";
-    // Sử dụng endpoint của Generative Language API có chỉ định khu vực và xác thực bằng API Key
-    const apiUrl = `https://${region}-generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    // 4. Gọi API của Google sử dụng mô hình gemini-pro
+    const model = "gemini-pro";
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     console.log(`Calling Google Generative Language API at: ${apiUrl}`);
     const geminiResponse = await fetch(apiUrl, {
