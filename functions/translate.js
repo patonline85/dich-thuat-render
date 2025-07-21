@@ -1,7 +1,7 @@
 /**
  * File: /functions/translate.js
  * Xử lý yêu cầu POST đến /translate
- * Sử dụng Google Vertex AI endpoint để tránh lỗi giới hạn vị trí địa lý.
+ * Sử dụng regional generativelanguage endpoint để giải quyết lỗi vị trí và xác thực.
  */
 export async function onRequestPost(context) {
   try {
@@ -18,19 +18,17 @@ export async function onRequestPost(context) {
       });
     }
 
-    // 2. Lấy API key và Project ID từ biến môi trường
+    // 2. Lấy API key từ biến môi trường
     const apiKey = context.env.GOOGLE_API_KEY;
-    const projectId = context.env.GOOGLE_CLOUD_PROJECT_ID;
-
-    if (!apiKey || !projectId) {
-      console.error("FATAL: GOOGLE_API_KEY or GOOGLE_CLOUD_PROJECT_ID environment variable not set.");
-      return new Response(JSON.stringify({ error: 'API key or Project ID not configured on server.' }), {
+    if (!apiKey) {
+      console.error("FATAL: GOOGLE_API_KEY environment variable not set.");
+      return new Response(JSON.stringify({ error: 'API key not configured on server.' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    console.log("API Key and Project ID found. Preparing prompt for Google Vertex AI.");
+    console.log("API Key found. Preparing prompt.");
     // 3. Tạo prompt
     const prompt = `
       **Yêu cầu nhiệm vụ (TUÂN THỦ TUYỆT ĐỐI):**
@@ -55,17 +53,17 @@ export async function onRequestPost(context) {
       ---
     `;
 
-    // 4. Gọi API của Google Vertex AI tại khu vực us-central1
+    // 4. Gọi API của Google tại khu vực us-central1 để tránh lỗi vị trí
     const region = "us-central1";
     const model = "gemini-1.5-flash-latest";
-    const apiUrl = `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/google/models/${model}:generateContent`;
+    // Sử dụng endpoint của Generative Language API có chỉ định khu vực và xác thực bằng API Key
+    const apiUrl = `https://${region}-generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    console.log(`Calling Google Vertex AI API at: ${apiUrl}`);
+    console.log(`Calling Google Generative Language API at: ${apiUrl}`);
     const geminiResponse = await fetch(apiUrl, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}` // Vertex AI thường dùng Bearer token, nhưng API key cũng được hỗ trợ theo cách này
       },
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }] }),
     });
