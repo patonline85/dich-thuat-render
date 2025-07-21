@@ -1,7 +1,7 @@
 /**
  * File: /functions/translate.js
  * Xử lý yêu cầu POST đến /translate
- * Sử dụng global endpoint và mô hình gemini-pro để giải quyết các vấn đề về vị trí.
+ * Sử dụng global endpoint và mô hình gemini-1.5-flash-latest.
  */
 export async function onRequestPost(context) {
   try {
@@ -53,8 +53,8 @@ export async function onRequestPost(context) {
       ---
     `;
 
-    // 4. Gọi API của Google sử dụng mô hình gemini-pro
-    const model = "gemini-pro";
+    // 4. Gọi API của Google sử dụng mô hình gemini-1.5-flash-latest
+    const model = "gemini-1.5-flash-latest";
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     console.log(`Calling Google Generative Language API at: ${apiUrl}`);
