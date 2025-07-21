@@ -1,35 +1,100 @@
 /**
  * File: /functions/translate.js
- * Xử lý yêu cầu POST đến /translate
- * Sử dụng global endpoint và mô hình gemini-1.5-flash-latest.
+ * Xử lý yêu cầu POST đến /translate.
+ * Sử dụng Google Vertex AI với xác thực OAuth2 từ Service Account
+ * để giải quyết triệt để lỗi giới hạn vị trí.
  */
+
+// --- Helpers for JWT and Base64 ---
+function base64url(source) {
+  let a = btoa(source);
+  a = a.replace(/=/g, '');
+  a = a.replace(/\+/g, '-');
+  a = a.replace(/\//g, '_');
+  return a;
+}
+
+async function getAccessToken(serviceAccount) {
+  const header = {
+    alg: 'RS256',
+    typ: 'JWT',
+  };
+
+  const now = Math.floor(Date.now() / 1000);
+  const claimSet = {
+    iss: serviceAccount.client_email,
+    sub: serviceAccount.client_email,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600, // Token expires in 1 hour
+    scope: 'https://www.googleapis.com/auth/cloud-platform',
+  };
+
+  const encodedHeader = base64url(JSON.stringify(header));
+  const encodedClaimSet = base64url(JSON.stringify(claimSet));
+  const signingInput = `${encodedHeader}.${encodedClaimSet}`;
+
+  // Import the private key
+  const keyData = atob(serviceAccount.private_key.split('-----')[2].replace(/\s/g, ''));
+  const keyBuffer = new Uint8Array(keyData.length).map((_, i) => keyData.charCodeAt(i));
+  
+  const privateKey = await crypto.subtle.importKey(
+    'pkcs8',
+    keyBuffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  // Sign the JWT
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    privateKey,
+    new TextEncoder().encode(signingInput)
+  );
+
+  const encodedSignature = base64url(String.fromCharCode(...new Uint8Array(signature)));
+  const jwt = `${signingInput}.${encodedSignature}`;
+
+  // Exchange JWT for an access token
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+  });
+
+  const tokenData = await tokenResponse.json();
+  if (!tokenData.access_token) {
+    throw new Error('Could not retrieve access token.');
+  }
+  return tokenData.access_token;
+}
+
+
 export async function onRequestPost(context) {
   try {
-    console.log("Function invoked. Processing request...");
+    console.log("Function invoked. Attempting Vertex AI auth...");
 
-    // 1. Lấy dữ liệu từ yêu cầu POST
+    // 1. Lấy và phân tích cú pháp Service Account JSON từ biến môi trường
+    const serviceAccountJSON = context.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    if (!serviceAccountJSON) {
+      throw new Error("FATAL: GOOGLE_SERVICE_ACCOUNT_JSON environment variable not set.");
+    }
+    const serviceAccount = JSON.parse(serviceAccountJSON);
+    const projectId = serviceAccount.project_id;
+
+    // 2. Lấy Access Token
+    const accessToken = await getAccessToken(serviceAccount);
+    console.log("Successfully obtained Access Token.");
+
+    // 3. Lấy văn bản cần dịch từ yêu cầu
     const requestBody = await context.request.json();
     const { chineseText } = requestBody;
-
     if (!chineseText) {
-      return new Response(JSON.stringify({ error: 'No Chinese text provided.' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return new Response(JSON.stringify({ error: 'No Chinese text provided.' }), { status: 400 });
     }
-
-    // 2. Lấy API key từ biến môi trường
-    const apiKey = context.env.GOOGLE_API_KEY;
-    if (!apiKey) {
-      console.error("FATAL: GOOGLE_API_KEY environment variable not set.");
-      return new Response(JSON.stringify({ error: 'API key not configured on server.' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    console.log("API Key found. Preparing prompt.");
-    // 3. Tạo prompt
+    
+    // 4. Tạo prompt
     const prompt = `
       **Yêu cầu nhiệm vụ (TUÂN THỦ TUYỆT ĐỐI):**
       Bạn PHẢI hành động như "Trợ Lý Dịch Khai Thị", một chuyên gia dịch thuật tiếng Trung sang tiếng Việt trong lĩnh vực Phật giáo, dựa trên triết lý và khai thị của Đài Trưởng Lư Quân Hoành.
@@ -53,42 +118,41 @@ export async function onRequestPost(context) {
       ---
     `;
 
-    // 4. Gọi API của Google sử dụng mô hình gemini-1.5-flash-latest
-    const model = "gemini-1.5-flash-latest";
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    // 5. Gọi API của Google Vertex AI tại khu vực us-central1
+    const region = "us-central1";
+    const model = "gemini-1.5-flash-001"; // Sử dụng phiên bản cụ thể hơn
+    const apiUrl = `https://${region}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${region}/publishers/google/models/${model}:generateContent`;
 
-    console.log(`Calling Google Generative Language API at: ${apiUrl}`);
-    const geminiResponse = await fetch(apiUrl, {
+    console.log(`Calling Vertex AI API at: ${apiUrl}`);
+    const vertexResponse = await fetch(apiUrl, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
       },
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }] }),
     });
-    
-    console.log(`Google API responded with status: ${geminiResponse.status}`);
-    const result = await geminiResponse.json();
 
-    if (!geminiResponse.ok) {
-      console.error("Error from Google API:", JSON.stringify(result, null, 2));
-      throw new Error(result.error?.message || 'An error occurred with the translation service.');
+    console.log(`Vertex AI API responded with status: ${vertexResponse.status}`);
+    const result = await vertexResponse.json();
+
+    if (!vertexResponse.ok) {
+      console.error("Error from Vertex AI API:", JSON.stringify(result, null, 2));
+      throw new Error(result.error?.message || 'An error occurred with the Vertex AI service.');
     }
-    
-    // 5. Kiểm tra và trích xuất nội dung dịch
+
+    // 6. Trích xuất và trả về kết quả
     const translatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
     if (!translatedText) {
-        throw new Error("Could not extract translated text from the API response.");
+      throw new Error("Could not extract translated text from the API response.");
     }
-    
-    // 6. Trả kết quả về cho frontend
+
     return new Response(JSON.stringify({ translation: translatedText.trim() }), {
-      status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
 
   } catch (error) {
-    console.error('Error caught in Cloudflare Function:', error);
+    console.error('Error caught in Cloudflare Function:', error.message);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
