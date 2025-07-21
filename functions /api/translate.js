@@ -1,29 +1,35 @@
 /**
  * File: /functions/api/translate.js
  * Xử lý yêu cầu POST đến /api/translate
+ * Phiên bản cải tiến với logging và xử lý lỗi tốt hơn.
  */
 export async function onRequestPost(context) {
   try {
+    console.log("Function invoked. Processing request...");
+
     // 1. Lấy dữ liệu từ yêu cầu POST
     const requestBody = await context.request.json();
     const { chineseText } = requestBody;
 
     if (!chineseText) {
+      console.log("Error: No Chinese text provided.");
       return new Response(JSON.stringify({ error: 'No Chinese text provided.' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    // 2. Lấy API key từ biến môi trường đã cài đặt trên Cloudflare
+    // 2. Lấy API key từ biến môi trường
     const apiKey = context.env.GOOGLE_API_KEY;
     if (!apiKey) {
+      console.error("FATAL: GOOGLE_API_KEY environment variable not set.");
       return new Response(JSON.stringify({ error: 'API key not configured on server.' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
+    console.log("API Key found. Preparing prompt for Google Gemini.");
     // 3. Tạo prompt giống như trong file index.js cũ của bạn
     const prompt = `
       **Yêu cầu nhiệm vụ (TUÂN THỦ TUYỆT ĐỐI):**
@@ -50,29 +56,53 @@ export async function onRequestPost(context) {
 
     // 4. Gọi API của Google Gemini
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+
+    console.log("Calling Google Gemini API...");
     const geminiResponse = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }] }),
     });
+    console.log(`Google API responded with status: ${geminiResponse.status}`);
 
-    const result = await geminiResponse.json();
-
-    if (!geminiResponse.ok) {
-      console.error("Error from Google API:", result);
-      throw new Error(result.error?.message || 'Error from Google AI API');
+    const responseClone = geminiResponse.clone();
+    let result;
+    try {
+        result = await geminiResponse.json();
+    } catch (e) {
+        console.error("Failed to parse Google API response as JSON.", e);
+        const rawText = await responseClone.text();
+        console.error("Raw Google API response text:", rawText);
+        throw new Error("Could not parse response from translation service.");
     }
 
+    if (!geminiResponse.ok) {
+      console.error("Error from Google API:", JSON.stringify(result, null, 2));
+      throw new Error(result.error?.message || 'An error occurred with the translation service.');
+    }
+    
+    console.log("Google API response received successfully. Extracting text.");
+    // 5. Kiểm tra và trích xuất nội dung dịch
     const translatedText = result.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    // 5. Trả kết quả về cho frontend
-    return new Response(JSON.stringify({ translation: translatedText }), {
+    if (!translatedText) {
+        console.error("Translation text not found in Google API response. Full response:", JSON.stringify(result, null, 2));
+        const finishReason = result.candidates?.[0]?.finishReason;
+        if (finishReason && finishReason !== 'STOP') {
+             throw new Error(`Translation was not completed. Reason: ${finishReason}`);
+        }
+        throw new Error("Could not extract translated text from the API response.");
+    }
+    
+    console.log("Translation successful. Returning response to client.");
+    // 6. Trả kết quả về cho frontend
+    return new Response(JSON.stringify({ translation: translatedText.trim() }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
 
   } catch (error) {
-    console.error('Error in Cloudflare Function:', error);
+    console.error('Error caught in Cloudflare Function:', error);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
