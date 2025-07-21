@@ -147,4 +147,51 @@
                     if (!response.ok) {
                         // Nếu có lỗi, hiển thị thông báo từ backend
                         throw new Error(result.error || 'Lỗi không xác định từ máy chủ.');
-                  
+                    }
+
+                    if (result.translation) {
+                        vietnameseTextArea.value = result.translation;
+                    } else {
+                         throw new Error("Phản hồi từ API không hợp lệ hoặc không có nội dung dịch.");
+                    }
+
+                } catch (error) {
+                    console.error("Lỗi chi tiết khi dịch:", error);
+                    vietnameseTextArea.value = `Đã xảy ra lỗi khi dịch. Vui lòng thử lại sau.\n\nChi tiết: ${error.message}`;
+                    showToast("Đã có lỗi xảy ra. Vui lòng thử lại.");
+                } finally {
+                    loader.classList.add('hidden');
+                    buttonText.textContent = 'Dịch văn bản';
+                    translateButton.disabled = false;
+                }
+            });
+
+            // --- Copy Function ---
+            copyButton.addEventListener('click', () => {
+                const chineseText = chineseTextArea.value.trim();
+                const vietnameseText = vietnameseTextArea.value.trim();
+
+                if (!chineseText && !vietnameseText) {
+                    showToast("Không có nội dung để sao chép.");
+                    return;
+                }
+
+                const textToCopy = `Bản gốc:\n${chineseText}\n\nBản dịch:\n${vietnameseText}`;
+                
+                const tempTextArea = document.createElement('textarea');
+                tempTextArea.value = textToCopy;
+                document.body.appendChild(tempTextArea);
+                tempTextArea.select();
+                try {
+                    document.execCommand('copy');
+                    showToast("Đã sao chép bản gốc và bản dịch!");
+                } catch (err) {
+                    console.error('Không thể sao chép: ', err);
+                    showToast("Lỗi! Không thể sao chép.");
+                }
+                document.body.removeChild(tempTextArea);
+            });
+        });
+    </script>
+</body>
+</html>
