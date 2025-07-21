@@ -1,16 +1,11 @@
 {
-  "name": "tro-ly-dich-thuat-render",
+  "name": "tro-ly-dich-thuat-cloudflare",
   "version": "1.0.0",
-  "description": "Dich thuat app on Render",
-  "main": "index.js",
+  "private": true,
   "scripts": {
-    "start": "node index.js"
+    "deploy": "wrangler pages deploy ."
   },
-  "dependencies": {
-    "express": "^4.19.2",
-    "node-fetch": "^2.7.0"
-  },
-  "engines": {
-    "node": "18"
+  "devDependencies": {
+    "wrangler": "^3.0.0"
   }
 }
